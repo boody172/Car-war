@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useGameStore } from "@/state/gameStore";
 import { getConnection, disconnectFromRoom } from "@/net/connection";
@@ -18,7 +18,14 @@ export default function Lobby() {
   const maxPlayers = useGameStore((s) => s.maxPlayers);
   const errorMessage = useGameStore((s) => s.errorMessage);
   const [copied, setCopied] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [canNativeShare, setCanNativeShare] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCanNativeShare(typeof navigator !== "undefined" && !!navigator.share);
+  }, []);
 
   const roster = Object.values(players).sort((a, b) => a.joinedAt - b.joinedAt);
   const self = selfId ? players[selfId] : undefined;
@@ -28,6 +35,7 @@ export default function Lobby() {
   const takenCharacters = new Set(roster.filter((p) => p.id !== selfId).map((p) => p.characterId));
 
   const shareUrl = typeof window !== "undefined" && roomId ? `${window.location.origin}/room/${roomId}` : "";
+  const inviteText = `Join my Car War room! 🏁 Code: ${roomId} — ${shareUrl}`;
 
   const copyLink = async () => {
     try {
@@ -37,6 +45,48 @@ export default function Lobby() {
     } catch {
       // clipboard API unavailable — user can still select the text manually
     }
+  };
+
+  const copyCode = async () => {
+    if (!roomId) return;
+    try {
+      await navigator.clipboard.writeText(roomId);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 1800);
+    } catch {
+      // clipboard API unavailable — user can still select the text manually
+    }
+  };
+
+  const shareNative = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Car War", text: inviteText, url: shareUrl });
+      } catch {
+        // user dismissed the share sheet — nothing to do
+      }
+    }
+  };
+
+  const shareWhatsApp = () => {
+    window.open(`https://wa.me/?text=${encodeURIComponent(inviteText)}`, "_blank", "noopener");
+  };
+
+  const shareMessenger = async () => {
+    const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+    if (isMobile) {
+      window.location.href = `fb-messenger://share/?link=${encodeURIComponent(shareUrl)}`;
+    } else {
+      await copyLink();
+      useGameStore.getState().pushToast("Link copied — paste it in Messenger!", "info");
+      window.open("https://www.messenger.com/", "_blank", "noopener");
+    }
+  };
+
+  const shareDiscord = async () => {
+    await copyLink();
+    useGameStore.getState().pushToast("Link copied — paste it in Discord!", "info");
+    window.open("https://discord.com/app", "_blank", "noopener");
   };
 
   return (
@@ -58,7 +108,24 @@ export default function Lobby() {
           </p>
         </div>
 
-        <div className="mb-5 flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-2">
+        <button
+          onClick={copyCode}
+          className="mb-2 flex w-full items-center justify-between rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-2.5 transition hover:border-amber-400/70"
+        >
+          <span className="text-left">
+            <span className="block text-[10px] font-semibold uppercase tracking-widest text-amber-300/80">
+              Room Code
+            </span>
+            <span className="font-mono text-xl font-black tracking-[0.2em] text-white">
+              {roomId}
+            </span>
+          </span>
+          <span className="shrink-0 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-bold uppercase text-black">
+            {codeCopied ? "Copied!" : "Copy Code"}
+          </span>
+        </button>
+
+        <div className="mb-3 flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-2">
           <input
             readOnly
             value={shareUrl}
@@ -67,9 +134,44 @@ export default function Lobby() {
           />
           <button
             onClick={copyLink}
-            className="shrink-0 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-bold uppercase text-black transition hover:bg-amber-300"
+            className="shrink-0 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-bold uppercase text-white transition hover:bg-white/20"
           >
             {copied ? "Copied!" : "Copy Link"}
+          </button>
+        </div>
+
+        <div className="mb-5 grid grid-cols-4 gap-2">
+          <button
+            onClick={shareWhatsApp}
+            title="Share via WhatsApp"
+            className="flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-white/5 py-2.5 text-white/80 transition hover:border-emerald-400/50 hover:bg-emerald-400/10"
+          >
+            <span className="text-lg">💬</span>
+            <span className="text-[9px] font-bold uppercase tracking-wide">WhatsApp</span>
+          </button>
+          <button
+            onClick={shareMessenger}
+            title="Share via Messenger"
+            className="flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-white/5 py-2.5 text-white/80 transition hover:border-blue-400/50 hover:bg-blue-400/10"
+          >
+            <span className="text-lg">📩</span>
+            <span className="text-[9px] font-bold uppercase tracking-wide">Messenger</span>
+          </button>
+          <button
+            onClick={shareDiscord}
+            title="Share via Discord"
+            className="flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-white/5 py-2.5 text-white/80 transition hover:border-indigo-400/50 hover:bg-indigo-400/10"
+          >
+            <span className="text-lg">🎮</span>
+            <span className="text-[9px] font-bold uppercase tracking-wide">Discord</span>
+          </button>
+          <button
+            onClick={canNativeShare ? shareNative : copyLink}
+            title="More sharing options"
+            className="flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-white/5 py-2.5 text-white/80 transition hover:border-amber-400/50 hover:bg-amber-400/10"
+          >
+            <span className="text-lg">📤</span>
+            <span className="text-[9px] font-bold uppercase tracking-wide">More</span>
           </button>
         </div>
 
