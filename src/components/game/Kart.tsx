@@ -20,8 +20,7 @@ import { useHazardStore } from "@/state/hazardStore";
 import { RaceProgressTracker, computePlace, findLeader, findNearest } from "@/lib/raceProgress";
 import { getConnection } from "@/net/connection";
 import { getLatest } from "@/net/snapshotBuffer";
-import { ITEM_BOXES } from "@/lib/track";
-import { LAPS_TO_WIN } from "@/shared/types";
+import { useTrack } from "@/hooks/useTrack";
 import type { Vec3, WeaponKind } from "@/shared/types";
 
 interface KartProps {
@@ -32,11 +31,12 @@ interface KartProps {
 }
 
 export default function Kart({ startPosition, startRotationY, color, cameraEnabled }: KartProps) {
+  const track = useTrack();
   const modelRef = useRef<KartModelHandle>(null);
   const steerAngleRef = useRef(0);
   const driftChargeRef = useRef(0);
   const driftHeldPrevRef = useRef(false);
-  const tracker = useRef(new RaceProgressTracker());
+  const tracker = useRef(new RaceProgressTracker(track));
   const seqRef = useRef(0);
   const lastSendRef = useRef(0);
   const boxCooldowns = useRef(new Map<string, number>());
@@ -111,7 +111,8 @@ export default function Kart({ startPosition, startRotationY, color, cameraEnabl
         const front = pos.clone().addScaledVector(forward, 4.5);
         conn.send({ t: "weapon", id, kind, p: [front.x, 0, front.z], yaw });
       } else if (kind === "ball") {
-        const targetId = findLeader(selfId);
+        const battleMode = useGameStore.getState().mode === "battle";
+        const targetId = battleMode ? findNearest(pos, selfId)?.id ?? null : findLeader(selfId);
         if (!targetId) return;
         const snap = getLatest(targetId);
         const targetP: Vec3 = snap ? snap.p : [pos.x, pos.y, pos.z];
@@ -251,7 +252,7 @@ export default function Kart({ startPosition, startRotationY, color, cameraEnabl
         dist: tracker.current.dist,
       });
       gameState.updateSelfRace({
-        lap: Math.min(tracker.current.lap, LAPS_TO_WIN),
+        lap: Math.min(tracker.current.lap, track.laps),
         checkpoint: tracker.current.checkpointsPassed,
         place,
         speed: Math.abs(forwardSpeed),
@@ -260,7 +261,11 @@ export default function Kart({ startPosition, startRotationY, color, cameraEnabl
       gameState.updateSelfRace({ speed: Math.abs(forwardSpeed) });
     }
 
-    if (!gameState.selfRace.finished && tracker.current.lap > LAPS_TO_WIN) {
+    if (
+      gameState.mode !== "battle" &&
+      !gameState.selfRace.finished &&
+      tracker.current.lap > track.laps
+    ) {
       const raceStartedAt = gameState.selfRace.raceStartedAt ?? now;
       const timeMs = now - raceStartedAt;
       gameState.updateSelfRace({ finished: true, finishTimeMs: timeMs });
@@ -273,7 +278,7 @@ export default function Kart({ startPosition, startRotationY, color, cameraEnabl
 
     // --- Item box pickups ---
     if (gameState.phase === "racing" && !gameState.heldItem) {
-      for (const box of ITEM_BOXES) {
+      for (const box of track.itemBoxes) {
         const cd = boxCooldowns.current.get(box.id) ?? 0;
         if (cd > now) continue;
         const dx = pos.x - box.position[0];

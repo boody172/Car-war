@@ -3,15 +3,6 @@
 import { useGameStore } from "@/state/gameStore";
 import { getConnection } from "@/net/connection";
 import { getCharacter } from "@/shared/characters";
-import { useTrack } from "@/hooks/useTrack";
-
-function formatTime(ms: number | null): string {
-  if (ms == null) return "DNF";
-  const totalSec = ms / 1000;
-  const min = Math.floor(totalSec / 60);
-  const sec = (totalSec % 60).toFixed(2).padStart(5, "0");
-  return `${min}:${sec}`;
-}
 
 const MEDAL = ["🥇", "🥈", "🥉"];
 const PODIUM_RING = [
@@ -20,26 +11,26 @@ const PODIUM_RING = [
   "ring-orange-400/50 bg-orange-500/10 border-orange-400/40",
 ];
 
-export default function ResultsScreen() {
-  const track = useTrack();
+export default function BattleResultsScreen() {
   const mode = useGameStore((s) => s.mode);
-  const results = useGameStore((s) => s.results);
+  const results = useGameStore((s) => s.battleResults);
   const players = useGameStore((s) => s.players);
   const selfId = useGameStore((s) => s.selfId);
   const hostId = useGameStore((s) => s.hostId);
 
-  if (mode !== "race" || !results) return null;
+  if (mode !== "battle" || !results) return null;
   const isHost = selfId === hostId;
   const sorted = results.slice().sort((a, b) => a.place - b.place);
+  const champion = sorted[0];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
       <div className="w-full max-w-md animate-[popIn_0.35s_ease-out] rounded-2xl border border-white/10 bg-[#14161c] p-6 shadow-2xl">
         <h2 className="mb-1 text-center font-mono text-2xl font-black uppercase tracking-wide text-white">
-          Race Complete
+          Battle Complete
         </h2>
         <p className="mb-5 text-center text-sm text-white/50">
-          {track.name} — Final Standings
+          {champion ? `🏆 ${champion.name} wins the demolition derby` : "Demolition Yard — Final Score"}
         </p>
 
         <ol className="mb-6 space-y-2">
@@ -68,7 +59,7 @@ export default function ResultsScreen() {
                   {r.name}
                   {r.id === selfId && <span className="text-xs text-amber-300">(you)</span>}
                 </span>
-                <span className="font-mono text-sm text-white/70">{formatTime(r.timeMs)}</span>
+                <span className="font-mono text-sm text-white/70">🔨 {r.score}</span>
               </li>
             );
           })}

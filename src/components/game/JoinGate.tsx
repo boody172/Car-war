@@ -3,16 +3,21 @@
 import { useEffect, useState } from "react";
 import { connectToRoom } from "@/net/connection";
 import { useGameStore } from "@/state/gameStore";
+import type { RoomMode } from "@/shared/types";
 
 const NAME_KEY = "carwar:name";
 
 export default function JoinGate({
   roomId,
   maxPlayers,
+  trackId,
+  mode,
   children,
 }: {
   roomId: string;
   maxPlayers: number;
+  trackId?: string;
+  mode?: RoomMode;
   children: React.ReactNode;
 }) {
   const [connected, setConnected] = useState(false);
@@ -34,7 +39,7 @@ export default function JoinGate({
     window.localStorage.setItem(NAME_KEY, trimmed);
     useGameStore.getState().setSelfName(trimmed);
     useGameStore.getState().setRoomId(roomId);
-    connectToRoom(roomId, trimmed, maxPlayers);
+    connectToRoom(roomId, trimmed, maxPlayers, trackId, mode);
     setPending(true);
     setConnected(true);
   };

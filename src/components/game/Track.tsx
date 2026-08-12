@@ -3,17 +3,8 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import { usePlane, useBox, useCylinder } from "@react-three/cannon";
-import {
-  OUTER_WALLS,
-  INNER_WALLS,
-  WALL_THICKNESS_M,
-  WALL_HEIGHT_M,
-  OBSTACLES,
-  RAMP,
-  GROUND_SIZE,
-  buildRibbonGeometry,
-  type ObstacleDef,
-} from "@/lib/track";
+import { useTrack } from "@/hooks/useTrack";
+import type { ObstacleDef, TrackData } from "@/lib/tracks/build";
 
 function GroundCollider() {
   usePlane(() => ({
@@ -24,29 +15,30 @@ function GroundCollider() {
   return null;
 }
 
-function GroundVisual() {
+function GroundVisual({ track }: { track: TrackData }) {
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]} receiveShadow>
-      <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
-      <meshStandardMaterial color="#3c6b3f" roughness={0.95} />
+      <planeGeometry args={[track.groundSize, track.groundSize]} />
+      <meshStandardMaterial color={track.theme.ground} roughness={0.95} />
     </mesh>
   );
 }
 
-function TrackRibbon() {
+function TrackRibbon({ track }: { track: TrackData }) {
   const geometry = useMemo(() => {
-    const { positions, uvs, indices } = buildRibbonGeometry();
+    const { positions, uvs, indices } = track.buildRibbonGeometry();
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
     geo.setIndex(indices);
     geo.computeVertexNormals();
     return geo;
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rebuilt only when the track id changes
+  }, [track.id]);
 
   return (
     <mesh geometry={geometry} receiveShadow>
-      <meshStandardMaterial color="#454851" roughness={0.92} metalness={0.02} />
+      <meshStandardMaterial color={track.theme.asphalt} roughness={0.92} metalness={0.02} />
     </mesh>
   );
 }
@@ -55,13 +47,24 @@ interface WallSegmentProps {
   position: [number, number, number];
   rotationY: number;
   length: number;
+  thickness: number;
+  height: number;
+  wallColor: string;
   curbColor: string;
 }
 
-function WallSegment({ position, rotationY, length, curbColor }: WallSegmentProps) {
+function WallSegment({
+  position,
+  rotationY,
+  length,
+  thickness,
+  height,
+  wallColor,
+  curbColor,
+}: WallSegmentProps) {
   const [ref] = useBox(() => ({
     type: "Static",
-    args: [WALL_THICKNESS_M, WALL_HEIGHT_M, length],
+    args: [thickness, height, length],
     position,
     rotation: [0, rotationY, 0],
     material: { friction: 0.2, restitution: 0.35 },
@@ -69,56 +72,63 @@ function WallSegment({ position, rotationY, length, curbColor }: WallSegmentProp
   return (
     <group ref={ref as never}>
       <mesh castShadow receiveShadow>
-        <boxGeometry args={[WALL_THICKNESS_M, WALL_HEIGHT_M, length]} />
-        <meshStandardMaterial color="#e8ddb5" roughness={0.75} />
+        <boxGeometry args={[thickness, height, length]} />
+        <meshStandardMaterial color={wallColor} roughness={0.75} />
       </mesh>
-      <mesh position={[0, WALL_HEIGHT_M / 2 + 0.03, 0]}>
-        <boxGeometry args={[WALL_THICKNESS_M + 0.05, 0.06, length]} />
+      <mesh position={[0, height / 2 + 0.03, 0]}>
+        <boxGeometry args={[thickness + 0.05, 0.06, length]} />
         <meshStandardMaterial color={curbColor} roughness={0.5} />
       </mesh>
     </group>
   );
 }
 
-function Walls() {
+function Walls({ track }: { track: TrackData }) {
   return (
     <>
-      {OUTER_WALLS.map((w, i) => (
+      {track.outerWalls.map((w, i) => (
         <WallSegment
           key={`out-${i}`}
           position={w.position}
           rotationY={w.rotationY}
           length={w.length}
-          curbColor={i % 2 === 0 ? "#ff5a3c" : "#f4f2ea"}
+          thickness={track.wallThickness}
+          height={track.wallHeight}
+          wallColor={track.theme.wall}
+          curbColor={i % 2 === 0 ? track.theme.curbA : track.theme.curbB}
         />
       ))}
-      {INNER_WALLS.map((w, i) => (
+      {track.innerWalls.map((w, i) => (
         <WallSegment
           key={`in-${i}`}
           position={w.position}
           rotationY={w.rotationY}
           length={w.length}
-          curbColor={i % 2 === 0 ? "#ffd23c" : "#f4f2ea"}
+          thickness={track.wallThickness}
+          height={track.wallHeight}
+          wallColor={track.theme.wall}
+          curbColor={i % 2 === 0 ? track.theme.curbB : track.theme.curbA}
         />
       ))}
     </>
   );
 }
 
-function Ramp() {
-  const angle = Math.atan2(RAMP.height, RAMP.length);
+function Ramp({ track }: { track: TrackData }) {
+  const { ramp } = track;
+  const angle = Math.atan2(ramp.height, ramp.length);
   const thickness = 0.9;
   const [ref] = useBox(() => ({
     type: "Static",
-    args: [RAMP.width, thickness, RAMP.length],
-    position: [RAMP.position[0], RAMP.height / 2 - 0.3, RAMP.position[2]],
-    rotation: [-angle, RAMP.rotationY, 0],
+    args: [ramp.width, thickness, ramp.length],
+    position: [ramp.position[0], ramp.height / 2 - 0.3, ramp.position[2]],
+    rotation: [-angle, ramp.rotationY, 0],
     material: { friction: 0.15, restitution: 0.05 },
   }));
   return (
     <group ref={ref as never}>
       <mesh castShadow receiveShadow>
-        <boxGeometry args={[RAMP.width, thickness, RAMP.length]} />
+        <boxGeometry args={[ramp.width, thickness, ramp.length]} />
         <meshStandardMaterial color="#b9762f" roughness={0.8} />
       </mesh>
     </group>
@@ -203,10 +213,10 @@ function Cone({ position }: ObstacleDef) {
   );
 }
 
-function Obstacles() {
+function Obstacles({ track }: { track: TrackData }) {
   return (
     <>
-      {OBSTACLES.map((o, i) => {
+      {track.obstacles.map((o, i) => {
         switch (o.kind) {
           case "crateStack":
             return <CrateStack key={i} {...o} />;
@@ -225,14 +235,15 @@ function Obstacles() {
 }
 
 export default function Track() {
+  const track = useTrack();
   return (
-    <group>
+    <group key={track.id}>
       <GroundCollider />
-      <GroundVisual />
-      <TrackRibbon />
-      <Walls />
-      <Ramp />
-      <Obstacles />
+      <GroundVisual track={track} />
+      <TrackRibbon track={track} />
+      <Walls track={track} />
+      <Ramp track={track} />
+      <Obstacles track={track} />
     </group>
   );
 }

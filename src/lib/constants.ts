@@ -59,3 +59,4 @@ export const CAMERA = {
 };
 
 export const COUNTDOWN_MS = 3400;
+export const BATTLE_DURATION_MS = 120000;

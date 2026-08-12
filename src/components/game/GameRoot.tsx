@@ -9,7 +9,7 @@ import Hazards from "./Hazards";
 import Kart from "./Kart";
 import RemoteKart from "./RemoteKart";
 import { useGameStore } from "@/state/gameStore";
-import { getStartTransform } from "@/lib/track";
+import { useTrack } from "@/hooks/useTrack";
 import { CAMERA } from "@/lib/constants";
 import { useKeyboardControls, useIsTouchDevice } from "@/hooks/useKeyboardControls";
 import TouchControls from "@/components/controls/TouchControls";
@@ -36,6 +36,7 @@ function Lighting() {
 }
 
 function Racers() {
+  const track = useTrack();
   const players = useGameStore((s) => s.players);
   const selfId = useGameStore((s) => s.selfId);
   const startOrder = useGameStore((s) => s.startOrder);
@@ -47,7 +48,7 @@ function Racers() {
       {order.map((id, index) => {
         const player = players[id];
         if (!player) return null;
-        const { position, rotationY } = getStartTransform(index);
+        const { position, rotationY } = track.getStartTransform(index);
         if (id === selfId) {
           return (
             <Kart
@@ -75,21 +76,23 @@ function Racers() {
 }
 
 export default function GameRoot() {
+  const track = useTrack();
   const isTouch = useIsTouchDevice();
   useKeyboardControls(!isTouch);
 
   const dpr = useMemo<[number, number]>(() => [1, 1.75], []);
+  const sky = track.theme.sky;
 
   return (
-    <div className="fixed inset-0 bg-[#8fc3ea]">
+    <div className="fixed inset-0" style={{ backgroundColor: sky }}>
       <Canvas
         shadows
         dpr={dpr}
         gl={{ antialias: true, powerPreference: "high-performance" }}
         camera={{ fov: CAMERA.fov, near: 0.1, far: 500, position: [0, 6, 12] }}
       >
-        <color attach="background" args={["#8fc3ea"]} />
-        <fog attach="fog" args={["#8fc3ea", 90, 260]} />
+        <color attach="background" args={[sky]} />
+        <fog attach="fog" args={[sky, 90, 260]} />
         <Lighting />
         <Suspense fallback={null}>
           <Physics

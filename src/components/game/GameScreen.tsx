@@ -6,6 +6,7 @@ import EffectsOverlay from "./EffectsOverlay";
 import Toasts from "./Toasts";
 import Countdown from "./Countdown";
 import ResultsScreen from "./ResultsScreen";
+import BattleResultsScreen from "./BattleResultsScreen";
 
 const GameRoot = dynamic(() => import("./GameRoot"), {
   ssr: false,
@@ -27,6 +28,7 @@ export default function GameScreen() {
       <Toasts />
       <Countdown />
       <ResultsScreen />
+      <BattleResultsScreen />
     </>
   );
 }

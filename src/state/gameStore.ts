@@ -2,9 +2,12 @@ import { create } from "zustand";
 import type {
   PlayerInfo,
   RoomPhase,
+  RoomMode,
   RaceResultEntry,
+  BattleResultEntry,
   WeaponKind,
 } from "@/shared/types";
+import { DEFAULT_TRACK_ID } from "@/shared/types";
 
 export type ConnStatus = "connecting" | "open" | "reconnecting" | "closed";
 
@@ -37,6 +40,8 @@ interface GameState {
   selfName: string;
   hostId: string | null;
   maxPlayers: number;
+  trackId: string;
+  mode: RoomMode;
   phase: RoomPhase;
   players: Record<string, PlayerInfo>;
   connStatus: ConnStatus;
@@ -44,6 +49,8 @@ interface GameState {
   raceStartAt: number | null;
   startOrder: string[];
   results: RaceResultEntry[] | null;
+  battleResults: BattleResultEntry[] | null;
+  battleHits: Record<string, number>;
   heldItem: WeaponKind | null;
   selfRace: SelfRaceState;
   effects: ActiveEffects;
@@ -60,16 +67,21 @@ interface GameState {
     phase: RoomPhase;
     hostId: string;
     maxPlayers: number;
+    trackId: string;
+    mode: RoomMode;
   }) => void;
   upsertPlayer: (p: PlayerInfo) => void;
   removePlayer: (id: string) => void;
   setHost: (id: string) => void;
   setPhase: (p: RoomPhase) => void;
-  startRace: (startAt: number, order: string[]) => void;
+  setTrackId: (id: string) => void;
+  startRace: (startAt: number, order: string[], trackId: string, mode: RoomMode) => void;
   resetRace: () => void;
   setHeldItem: (item: WeaponKind | null) => void;
   updateSelfRace: (partial: Partial<SelfRaceState>) => void;
   setResults: (r: RaceResultEntry[]) => void;
+  setBattleResults: (r: BattleResultEntry[]) => void;
+  registerHit: (attackerId: string) => void;
   pushToast: (text: string, kind?: Toast["kind"]) => void;
   dismissToast: (id: string) => void;
   stun: (durationMs: number) => void;
@@ -85,6 +97,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   selfName: "",
   hostId: null,
   maxPlayers: 6,
+  trackId: DEFAULT_TRACK_ID,
+  mode: "race",
   phase: "lobby",
   players: {},
   connStatus: "connecting",
@@ -92,6 +106,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   raceStartAt: null,
   startOrder: [],
   results: null,
+  battleResults: null,
+  battleHits: {},
   heldItem: null,
   selfRace: {
     lap: 1,
@@ -110,13 +126,15 @@ export const useGameStore = create<GameState>((set, get) => ({
   setConnStatus: (s) => set({ connStatus: s }),
   setError: (m) => set({ errorMessage: m }),
 
-  applyWelcome: ({ selfId, roomId, players, phase, hostId, maxPlayers }) =>
+  applyWelcome: ({ selfId, roomId, players, phase, hostId, maxPlayers, trackId, mode }) =>
     set({
       selfId,
       roomId,
       hostId,
       phase,
       maxPlayers,
+      trackId,
+      mode,
       players: Object.fromEntries(players.map((p) => [p.id, p])),
     }),
 
@@ -132,13 +150,18 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   setHost: (id) => set({ hostId: id }),
   setPhase: (p) => set({ phase: p }),
+  setTrackId: (id) => set({ trackId: id }),
 
-  startRace: (startAt, order) =>
+  startRace: (startAt, order, trackId, mode) =>
     set({
       phase: "countdown",
       raceStartAt: startAt,
       startOrder: order,
+      trackId,
+      mode,
       results: null,
+      battleResults: null,
+      battleHits: {},
       selfRace: {
         lap: 1,
         checkpoint: 0,
@@ -154,6 +177,8 @@ export const useGameStore = create<GameState>((set, get) => ({
     set({
       phase: "lobby",
       results: null,
+      battleResults: null,
+      battleHits: {},
       raceStartAt: null,
       heldItem: null,
       effects: { stunnedUntil: 0, blindedUntil: 0, boostUntil: 0, boostPower: 0 },
@@ -177,6 +202,12 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((s) => ({ selfRace: { ...s.selfRace, ...partial } })),
 
   setResults: (r) => set({ results: r, phase: "finished" }),
+  setBattleResults: (r) => set({ battleResults: r, phase: "finished" }),
+
+  registerHit: (attackerId) =>
+    set((s) => ({
+      battleHits: { ...s.battleHits, [attackerId]: (s.battleHits[attackerId] ?? 0) + 1 },
+    })),
 
   pushToast: (text, kind = "info") =>
     set((s) => ({

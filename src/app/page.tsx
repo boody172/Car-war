@@ -3,13 +3,18 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { generateRoomId, isValidRoomId } from "@/lib/roomId";
+import { TRACK_LIST, getTrack } from "@/lib/tracks/registry";
+import { ARENA_TRACK_ID, type RoomMode } from "@/shared/types";
 
 const NAME_KEY = "carwar:name";
+const arena = getTrack(ARENA_TRACK_ID);
 
 export default function HomePage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [maxPlayers, setMaxPlayers] = useState(6);
+  const [mode, setMode] = useState<RoomMode>("race");
+  const [trackId, setTrackId] = useState(TRACK_LIST[0].id);
   const [joinCode, setJoinCode] = useState("");
 
   useEffect(() => {
@@ -23,7 +28,8 @@ export default function HomePage() {
     const trimmed = name.trim().slice(0, 16) || "Racer";
     window.localStorage.setItem(NAME_KEY, trimmed);
     const id = generateRoomId();
-    router.push(`/room/${id}?max=${maxPlayers}`);
+    const chosenTrack = mode === "battle" ? ARENA_TRACK_ID : trackId;
+    router.push(`/room/${id}?max=${maxPlayers}&track=${chosenTrack}&mode=${mode}`);
   };
 
   const joinRoom = (e: React.FormEvent) => {
@@ -48,11 +54,11 @@ export default function HomePage() {
         <p className="mb-2 font-mono text-xs uppercase tracking-[0.35em] text-amber-400">
           Construction &amp; Demolition Kart Racing
         </p>
-        <h1 className="font-mono text-5xl font-black uppercase tracking-tight text-white sm:text-6xl">
+        <h1 className="font-mono text-5xl font-black uppercase tracking-tight text-white drop-shadow-[0_2px_24px_rgba(255,178,32,0.35)] sm:text-6xl">
           Car <span className="text-amber-400">War</span>
         </h1>
         <p className="mt-3 max-w-md text-sm text-white/50">
-          Drift the Skyline Loop, smash item crates, and bury your rivals under concrete walls,
+          Drift the track, smash item crates, and bury your rivals under concrete walls,
           wrecking balls, and blueprint blindness. 2–6 players, one shared link.
         </p>
       </div>
@@ -85,11 +91,89 @@ export default function HomePage() {
             className="mb-5 w-full accent-amber-400"
           />
 
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-white/50">
+            Mode
+          </label>
+          <div className="mb-5 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setMode("race")}
+              className={`rounded-xl border-2 p-3 text-left transition ${
+                mode === "race"
+                  ? "border-amber-400 bg-amber-400/10"
+                  : "border-white/10 bg-white/5 hover:border-white/25"
+              }`}
+            >
+              <p className="text-xs font-bold text-white">🏁 Race</p>
+              <p className="mt-0.5 text-[10px] leading-snug text-white/40">
+                First to the checkered flag, laps &amp; laps of chaos.
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("battle")}
+              className={`rounded-xl border-2 p-3 text-left transition ${
+                mode === "battle"
+                  ? "border-amber-400 bg-amber-400/10"
+                  : "border-white/10 bg-white/5 hover:border-white/25"
+              }`}
+            >
+              <p className="text-xs font-bold text-white">💥 Battle Arena</p>
+              <p className="mt-0.5 text-[10px] leading-snug text-white/40">
+                Free-for-all combat pit. Most hits wins.
+              </p>
+            </button>
+          </div>
+
+          {mode === "race" ? (
+            <>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-white/50">
+                Track
+              </label>
+              <div className="mb-5 grid grid-cols-2 gap-2">
+                {TRACK_LIST.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setTrackId(t.id)}
+                    className={`rounded-xl border-2 p-3 text-left transition ${
+                      trackId === t.id
+                        ? "border-amber-400 bg-amber-400/10"
+                        : "border-white/10 bg-white/5 hover:border-white/25"
+                    }`}
+                  >
+                    <div
+                      className="mb-2 h-10 w-full rounded-lg"
+                      style={{
+                        background: `linear-gradient(135deg, ${t.theme.sky}, ${t.theme.asphalt})`,
+                      }}
+                    />
+                    <p className="text-xs font-bold text-white">{t.name}</p>
+                    <p className="mt-0.5 text-[10px] leading-snug text-white/40">
+                      {t.description}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="mb-5 rounded-xl border-2 border-amber-400/40 bg-amber-400/5 p-3">
+              <div
+                className="mb-2 h-10 w-full rounded-lg"
+                style={{
+                  background: `linear-gradient(135deg, ${arena.theme.sky}, ${arena.theme.asphalt})`,
+                }}
+              />
+              <p className="text-xs font-bold text-white">{arena.name}</p>
+              <p className="mt-0.5 text-[10px] leading-snug text-white/40">{arena.description}</p>
+            </div>
+          )}
+
           <button
             type="submit"
             className="w-full rounded-xl bg-amber-400 py-3 font-bold uppercase tracking-wide text-black transition hover:bg-amber-300 active:scale-[0.98]"
           >
-            Create Race Room
+            {mode === "battle" ? "Create Battle Room" : "Create Race Room"}
           </button>
         </form>
 

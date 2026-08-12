@@ -4,15 +4,24 @@ import type {
   ServerMessage,
   PlayerInfo,
   RoomPhase,
+  RoomMode,
   WeaponKind,
   RaceResultEntry,
+  BattleResultEntry,
 } from "../src/shared/types";
 import {
   MAX_PLAYERS,
   MIN_PLAYERS,
-  PLAYER_COLORS,
+  DEFAULT_TRACK_ID,
+  ARENA_TRACK_ID,
 } from "../src/shared/types";
-import { WEAPON_DURATION, ITEM_BOX_RESPAWN_MS, COUNTDOWN_MS } from "../src/lib/constants";
+import { unclaimedCharacter, getCharacter } from "../src/shared/characters";
+import {
+  WEAPON_DURATION,
+  ITEM_BOX_RESPAWN_MS,
+  COUNTDOWN_MS,
+  BATTLE_DURATION_MS,
+} from "../src/lib/constants";
 
 const WEAPON_KINDS: WeaponKind[] = ["wall", "ball", "blueprint", "scaffold"];
 const WRAP_UP_MS = 22000; // grace period after the first finisher before DNF-ing stragglers
@@ -30,12 +39,16 @@ export default class RoomServer implements Party.Server {
   players = new Map<string, PlayerInfo>();
   hostId: string | null = null;
   phase: RoomPhase = "lobby";
+  mode: RoomMode = "race";
   maxPlayers = MAX_PLAYERS;
+  trackId: string = DEFAULT_TRACK_ID;
   itemBoxes = new Map<string, ItemBoxState>();
   finishedIds = new Set<string>();
   finishOrder: RaceResultEntry[] = [];
+  scores = new Map<string, number>();
   wrapUpTimer: ReturnType<typeof setTimeout> | null = null;
   phaseTimer: ReturnType<typeof setTimeout> | null = null;
+  battleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(readonly room: Party.Room) {}
 
@@ -64,10 +77,16 @@ export default class RoomServer implements Party.Server {
 
     switch (msg.t) {
       case "join":
-        this.handleJoin(sender, msg.name, msg.maxPlayers);
+        this.handleJoin(sender, msg.name, msg.maxPlayers, msg.trackId, msg.mode);
         break;
       case "ready":
         this.handleReady(sender, msg.ready);
+        break;
+      case "selectCharacter":
+        this.handleSelectCharacter(sender, msg.characterId);
+        break;
+      case "selectTrack":
+        this.handleSelectTrack(sender, msg.trackId);
         break;
       case "start":
         this.handleStart(sender);
@@ -141,7 +160,13 @@ export default class RoomServer implements Party.Server {
     }
   }
 
-  private handleJoin(sender: Party.Connection, name: string, requestedMax?: number) {
+  private handleJoin(
+    sender: Party.Connection,
+    name: string,
+    requestedMax?: number,
+    requestedTrackId?: string,
+    requestedMode?: RoomMode,
+  ) {
     if (this.players.has(sender.id)) return; // already joined (dup message)
 
     if (this.players.size === 0) {
@@ -150,6 +175,8 @@ export default class RoomServer implements Party.Server {
         MAX_PLAYERS,
         Math.max(MIN_PLAYERS, requestedMax ?? MAX_PLAYERS),
       );
+      this.mode = requestedMode === "battle" ? "battle" : "race";
+      this.trackId = this.mode === "battle" ? ARENA_TRACK_ID : requestedTrackId ?? this.trackId;
     }
 
     if (this.players.size >= this.maxPlayers) {
@@ -167,10 +194,14 @@ export default class RoomServer implements Party.Server {
       return;
     }
 
+    const takenCharacters = Array.from(this.players.values()).map((p) => p.characterId);
+    const character = unclaimedCharacter(takenCharacters);
+
     const info: PlayerInfo = {
       id: sender.id,
       name: sanitizeName(name),
-      color: PLAYER_COLORS[this.players.size % PLAYER_COLORS.length],
+      color: character.color,
+      characterId: character.id,
       ready: false,
       connected: true,
       isHost: sender.id === this.hostId,
@@ -187,6 +218,8 @@ export default class RoomServer implements Party.Server {
       phase: this.phase,
       hostId: this.hostId ?? sender.id,
       maxPlayers: this.maxPlayers,
+      trackId: this.trackId,
+      mode: this.mode,
     });
 
     this.broadcast({ t: "playerJoined", player: info }, [sender.id]);
@@ -198,6 +231,32 @@ export default class RoomServer implements Party.Server {
     p.ready = ready;
     this.players.set(p.id, p);
     this.broadcast({ t: "playerUpdated", player: p });
+  }
+
+  private handleSelectCharacter(sender: Party.Connection, characterId: string) {
+    const p = this.players.get(sender.id);
+    if (!p || this.phase !== "lobby") return;
+    const character = getCharacter(characterId);
+    if (!character) return;
+    const takenByOther = Array.from(this.players.values()).some(
+      (other) => other.id !== sender.id && other.characterId === characterId,
+    );
+    if (takenByOther) {
+      this.send(sender, { t: "error", message: "That driver is already taken." });
+      return;
+    }
+    p.characterId = character.id;
+    p.color = character.color;
+    this.players.set(p.id, p);
+    this.broadcast({ t: "playerUpdated", player: p });
+  }
+
+  private handleSelectTrack(sender: Party.Connection, trackId: string) {
+    if (sender.id !== this.hostId || this.phase !== "lobby") return;
+    if (this.mode === "battle") return; // arena is fixed for battle mode
+    if (!trackId) return;
+    this.trackId = trackId;
+    this.broadcast({ t: "trackChanged", trackId });
   }
 
   private handleStart(sender: Party.Connection) {
@@ -218,19 +277,27 @@ export default class RoomServer implements Party.Server {
     this.itemBoxes.clear();
     this.finishedIds.clear();
     this.finishOrder = [];
+    this.scores.clear();
     this.phase = "countdown";
     const startAt = Date.now() + COUNTDOWN_MS;
     const order = Array.from(this.players.keys());
 
-    this.broadcast({ t: "raceStart", startAt, order });
+    this.broadcast({ t: "raceStart", startAt, order, trackId: this.trackId, mode: this.mode });
 
     if (this.phaseTimer) clearTimeout(this.phaseTimer);
+    if (this.battleTimer) clearTimeout(this.battleTimer);
     this.phaseTimer = setTimeout(() => {
       if (this.phase === "countdown") {
         this.phase = "racing";
         this.broadcast({ t: "phaseChanged", phase: "racing" });
       }
     }, COUNTDOWN_MS + 50);
+
+    if (this.mode === "battle") {
+      this.battleTimer = setTimeout(() => {
+        this.concludeBattle();
+      }, COUNTDOWN_MS + BATTLE_DURATION_MS);
+    }
   }
 
   private handleRematch(sender: Party.Connection) {
@@ -239,6 +306,11 @@ export default class RoomServer implements Party.Server {
     this.finishedIds.clear();
     this.finishOrder = [];
     this.itemBoxes.clear();
+    this.scores.clear();
+    if (this.battleTimer) {
+      clearTimeout(this.battleTimer);
+      this.battleTimer = null;
+    }
     for (const p of this.players.values()) {
       p.ready = false;
       this.players.set(p.id, p);
@@ -286,14 +358,18 @@ export default class RoomServer implements Party.Server {
     if ((msg.kind === "ball" || msg.kind === "blueprint") && msg.targetId) {
       const targetId = msg.targetId;
       const delay = WEAPON_DURATION[msg.kind];
+      const attackerId = sender.id;
       setTimeout(() => {
         if (!this.players.has(targetId)) return;
         this.broadcast({
           t: "hitApplied",
           targetId,
           kind: msg.kind,
-          from: sender.id,
+          from: attackerId,
         });
+        if (this.mode === "battle" && this.phase === "racing") {
+          this.scores.set(attackerId, (this.scores.get(attackerId) ?? 0) + 1);
+        }
       }, delay);
     }
   }
@@ -315,6 +391,7 @@ export default class RoomServer implements Party.Server {
   }
 
   private maybeConcludeRace(force = false) {
+    if (this.mode !== "race") return;
     if (this.phase !== "racing" && this.phase !== "countdown") return;
     const totalConnected = this.players.size;
     const allFinished =
@@ -337,5 +414,29 @@ export default class RoomServer implements Party.Server {
 
     this.phase = "finished";
     this.broadcast({ t: "raceOver", results });
+  }
+
+  private concludeBattle() {
+    if (this.mode !== "battle") return;
+    if (this.phase !== "racing" && this.phase !== "countdown") return;
+
+    if (this.battleTimer) {
+      clearTimeout(this.battleTimer);
+      this.battleTimer = null;
+    }
+
+    const ranked = Array.from(this.players.values())
+      .map((p) => ({ id: p.id, name: p.name, score: this.scores.get(p.id) ?? 0 }))
+      .sort((a, b) => b.score - a.score);
+
+    const results: BattleResultEntry[] = ranked.map((r, i) => ({
+      id: r.id,
+      name: r.name,
+      score: r.score,
+      place: i + 1,
+    }));
+
+    this.phase = "finished";
+    this.broadcast({ t: "battleOver", results });
   }
 }

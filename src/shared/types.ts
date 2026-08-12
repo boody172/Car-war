@@ -9,6 +9,10 @@ export type WeaponKind = "wall" | "ball" | "blueprint" | "scaffold";
 export const MAX_PLAYERS = 6;
 export const MIN_PLAYERS = 2;
 export const LAPS_TO_WIN = 3;
+export const DEFAULT_TRACK_ID = "skyline-loop";
+export const ARENA_TRACK_ID = "demolition-yard";
+
+export type RoomMode = "race" | "battle";
 
 export const PLAYER_COLORS = [
   "#ff5a3c", // safety orange
@@ -23,6 +27,7 @@ export interface PlayerInfo {
   id: string;
   name: string;
   color: string;
+  characterId: string;
   ready: boolean;
   connected: boolean;
   isHost: boolean;
@@ -39,11 +44,20 @@ export interface RaceResultEntry {
   dnf: boolean;
 }
 
+export interface BattleResultEntry {
+  id: string;
+  name: string;
+  place: number;
+  score: number;
+}
+
 // ---------- Client -> Server ----------
 
 export type ClientMessage =
-  | { t: "join"; name: string; maxPlayers?: number }
+  | { t: "join"; name: string; maxPlayers?: number; trackId?: string; mode?: RoomMode }
   | { t: "ready"; ready: boolean }
+  | { t: "selectCharacter"; characterId: string }
+  | { t: "selectTrack"; trackId: string }
   | { t: "start" }
   | { t: "rematch" }
   | {
@@ -84,12 +98,15 @@ export type ServerMessage =
       phase: RoomPhase;
       hostId: string;
       maxPlayers: number;
+      trackId: string;
+      mode: RoomMode;
     }
   | { t: "playerJoined"; player: PlayerInfo }
   | { t: "playerLeft"; id: string }
   | { t: "playerUpdated"; player: PlayerInfo }
   | { t: "hostChanged"; hostId: string }
-  | { t: "raceStart"; startAt: number; order: string[] }
+  | { t: "trackChanged"; trackId: string }
+  | { t: "raceStart"; startAt: number; order: string[]; trackId: string; mode: RoomMode }
   | {
       t: "state";
       id: string;
@@ -121,6 +138,7 @@ export type ServerMessage =
   | { t: "hitApplied"; targetId: string; kind: WeaponKind; from: string }
   | { t: "playerFinished"; id: string; timeMs: number; place: number }
   | { t: "raceOver"; results: RaceResultEntry[] }
+  | { t: "battleOver"; results: BattleResultEntry[] }
   | { t: "phaseChanged"; phase: RoomPhase }
   | { t: "error"; message: string }
   | { t: "pong"; ts: number };

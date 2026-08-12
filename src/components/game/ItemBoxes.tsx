@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { ITEM_BOXES } from "@/lib/track";
+import { useTrack } from "@/hooks/useTrack";
 
 export default function ItemBoxes() {
+  const track = useTrack();
   const [respawns, setRespawns] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -19,7 +20,7 @@ export default function ItemBoxes() {
 
   return (
     <group>
-      {ITEM_BOXES.map((box) => (
+      {track.itemBoxes.map((box) => (
         <ItemBoxVisual
           key={box.id}
           position={box.position}

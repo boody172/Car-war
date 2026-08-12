@@ -1,5 +1,5 @@
 import { PartySocket } from "partysocket";
-import type { ClientMessage, ServerMessage } from "@/shared/types";
+import type { ClientMessage, ServerMessage, RoomMode } from "@/shared/types";
 import { useGameStore } from "@/state/gameStore";
 import { useHazardStore, hazardExpiryFor } from "@/state/hazardStore";
 import { pushSnapshot, dropPlayer } from "@/net/snapshotBuffer";
@@ -17,7 +17,13 @@ export class GameConnection {
   private itemGrantListeners = new Set<ItemGrantListener>();
   private finishListeners = new Set<FinishListener>();
 
-  constructor(roomId: string, name: string, maxPlayers: number) {
+  constructor(
+    roomId: string,
+    name: string,
+    maxPlayers: number,
+    trackId?: string,
+    mode?: RoomMode,
+  ) {
     const store = useGameStore.getState();
     store.setConnStatus("connecting");
 
@@ -35,7 +41,7 @@ export class GameConnection {
     this.socket.addEventListener("open", () => {
       useGameStore.getState().setConnStatus("open");
       useGameStore.getState().setError(null);
-      this.send({ t: "join", name, maxPlayers });
+      this.send({ t: "join", name, maxPlayers, trackId, mode });
     });
 
     this.socket.addEventListener("close", () => {
@@ -114,6 +120,10 @@ export class GameConnection {
         store.setHost(msg.hostId);
         break;
       }
+      case "trackChanged": {
+        store.setTrackId(msg.trackId);
+        break;
+      }
       case "phaseChanged": {
         store.setPhase(msg.phase);
         if (msg.phase === "lobby") {
@@ -124,7 +134,7 @@ export class GameConnection {
       }
       case "raceStart": {
         hazards.reset();
-        store.startRace(msg.startAt, msg.order);
+        store.startRace(msg.startAt, msg.order, msg.trackId, msg.mode);
         break;
       }
       case "state": {
@@ -204,6 +214,9 @@ export class GameConnection {
             store.pushToast("Blueprint blindness!", "hit");
           }
         }
+        if (store.mode === "battle") {
+          store.registerHit(msg.from);
+        }
         break;
       }
       case "playerFinished": {
@@ -215,6 +228,11 @@ export class GameConnection {
       }
       case "raceOver": {
         store.setResults(msg.results);
+        this.finishListeners.forEach((fn) => fn());
+        break;
+      }
+      case "battleOver": {
+        store.setBattleResults(msg.results);
         this.finishListeners.forEach((fn) => fn());
         break;
       }
@@ -238,11 +256,13 @@ export function connectToRoom(
   roomId: string,
   name: string,
   maxPlayers: number,
+  trackId?: string,
+  mode?: RoomMode,
 ): GameConnection {
   if (activeConnection) {
     activeConnection.dispose();
   }
-  activeConnection = new GameConnection(roomId, name, maxPlayers);
+  activeConnection = new GameConnection(roomId, name, maxPlayers, trackId, mode);
   return activeConnection;
 }
 
