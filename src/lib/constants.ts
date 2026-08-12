@@ -60,3 +60,9 @@ export const CAMERA = {
 
 export const COUNTDOWN_MS = 3400;
 export const BATTLE_DURATION_MS = 120000;
+
+// How long a player's seat is held after an unintentional disconnect (network
+// blip, tab reload, backgrounded phone) before they're actually removed from
+// the room. An explicit "Leave" always removes immediately, regardless of
+// this window.
+export const DISCONNECT_GRACE_MS = 45000;

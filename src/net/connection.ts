@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import { PartySocket } from "partysocket";
 import type { ClientMessage, ServerMessage, RoomMode } from "@/shared/types";
 import { useGameStore } from "@/state/gameStore";
@@ -8,12 +9,34 @@ export function partyHost(): string {
   return process.env.NEXT_PUBLIC_PARTYKIT_HOST || "localhost:1999";
 }
 
+// Persisted per-room so a page reload (not just a raw WebSocket reconnect)
+// can still be recognized by the server as "the same player coming back",
+// letting handleJoin reattach them to their existing seat instead of
+// rejecting them outright once the race/battle has started.
+function getOrCreateSessionId(roomId: string): string {
+  if (typeof window === "undefined") return nanoid();
+  const key = `carwar:session:${roomId}`;
+  try {
+    let id = window.sessionStorage.getItem(key);
+    if (!id) {
+      id = nanoid();
+      window.sessionStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    // sessionStorage unavailable (private mode, etc.) — fall back to an
+    // in-memory id that at least survives WebSocket-level auto-reconnects.
+    return nanoid();
+  }
+}
+
 type ItemGrantListener = (item: string, boxId: string) => void;
 type FinishListener = () => void;
 
 export class GameConnection {
   socket: PartySocket;
   private intentionalClose = false;
+  private sessionId: string;
   private itemGrantListeners = new Set<ItemGrantListener>();
   private finishListeners = new Set<FinishListener>();
 
@@ -26,6 +49,7 @@ export class GameConnection {
   ) {
     const store = useGameStore.getState();
     store.setConnStatus("connecting");
+    this.sessionId = getOrCreateSessionId(roomId);
 
     this.socket = new PartySocket({
       host: partyHost(),
@@ -41,7 +65,10 @@ export class GameConnection {
     this.socket.addEventListener("open", () => {
       useGameStore.getState().setConnStatus("open");
       useGameStore.getState().setError(null);
-      this.send({ t: "join", name, maxPlayers, trackId, mode });
+      // Fires on the initial connect AND every automatic reconnect — always
+      // carrying the same sessionId lets the server tell "still me" apart
+      // from a brand-new player.
+      this.send({ t: "join", name, maxPlayers, trackId, mode, sessionId: this.sessionId });
     });
 
     this.socket.addEventListener("close", () => {
@@ -77,6 +104,7 @@ export class GameConnection {
 
   dispose() {
     this.intentionalClose = true;
+    this.send({ t: "leave" });
     try {
       this.socket.close();
     } catch {
@@ -98,6 +126,9 @@ export class GameConnection {
     switch (msg.t) {
       case "welcome": {
         store.applyWelcome(msg);
+        if (msg.rejoined) {
+          store.pushToast("Reconnected!", "info");
+        }
         break;
       }
       case "playerJoined": {

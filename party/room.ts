@@ -21,6 +21,7 @@ import {
   ITEM_BOX_RESPAWN_MS,
   COUNTDOWN_MS,
   BATTLE_DURATION_MS,
+  DISCONNECT_GRACE_MS,
 } from "../src/lib/constants";
 
 const WEAPON_KINDS: WeaponKind[] = ["wall", "ball", "blueprint", "scaffold"];
@@ -36,7 +37,10 @@ interface ItemBoxState {
 }
 
 export default class RoomServer implements Party.Server {
-  players = new Map<string, PlayerInfo>();
+  players = new Map<string, PlayerInfo>(); // keyed by stable playerId
+  connToPlayer = new Map<string, string>(); // PartyKit connection.id -> playerId (changes across reconnects)
+  sessionIndex = new Map<string, string>(); // client-persisted sessionId -> playerId
+  disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>(); // playerId -> pending-removal timer
   hostId: string | null = null;
   phase: RoomPhase = "lobby";
   mode: RoomMode = "race";
@@ -60,6 +64,12 @@ export default class RoomServer implements Party.Server {
     this.room.broadcast(JSON.stringify(msg), without);
   }
 
+  /** Resolves a raw PartyKit connection back to the stable player record it's currently mapped to. */
+  private playerFor(sender: Party.Connection): PlayerInfo | undefined {
+    const pid = this.connToPlayer.get(sender.id);
+    return pid ? this.players.get(pid) : undefined;
+  }
+
   onConnect(connection: Party.Connection) {
     // Player is registered once we receive an explicit `join` message
     // (carries their chosen name), not on raw socket connect.
@@ -77,7 +87,10 @@ export default class RoomServer implements Party.Server {
 
     switch (msg.t) {
       case "join":
-        this.handleJoin(sender, msg.name, msg.maxPlayers, msg.trackId, msg.mode);
+        this.handleJoin(sender, msg.name, msg.maxPlayers, msg.trackId, msg.mode, msg.sessionId);
+        break;
+      case "leave":
+        this.handleLeave(sender);
         break;
       case "ready":
         this.handleReady(sender, msg.ready);
@@ -94,28 +107,30 @@ export default class RoomServer implements Party.Server {
       case "rematch":
         this.handleRematch(sender);
         break;
-      case "state":
-        if (this.phase === "racing" || this.phase === "countdown") {
-          this.broadcast(
-            {
-              t: "state",
-              id: sender.id,
-              p: msg.p,
-              q: msg.q,
-              v: msg.v,
-              steer: msg.steer,
-              throttle: msg.throttle,
-              lap: msg.lap,
-              cp: msg.cp,
-              dist: msg.dist,
-              place: msg.place,
-              seq: msg.seq,
-              ts: msg.ts,
-            },
-            [sender.id],
-          );
-        }
+      case "state": {
+        if (this.phase !== "racing" && this.phase !== "countdown") break;
+        const playerId = this.connToPlayer.get(sender.id);
+        if (!playerId) break;
+        this.broadcast(
+          {
+            t: "state",
+            id: playerId,
+            p: msg.p,
+            q: msg.q,
+            v: msg.v,
+            steer: msg.steer,
+            throttle: msg.throttle,
+            lap: msg.lap,
+            cp: msg.cp,
+            dist: msg.dist,
+            place: msg.place,
+            seq: msg.seq,
+            ts: msg.ts,
+          },
+          [sender.id],
+        );
         break;
+      }
       case "pickup":
         this.handlePickup(sender, msg.boxId);
         break;
@@ -131,15 +146,62 @@ export default class RoomServer implements Party.Server {
     }
   }
 
+  /** Explicit, user-chosen departure — always removes the seat immediately, no grace period. */
+  private handleLeave(sender: Party.Connection) {
+    const playerId = this.connToPlayer.get(sender.id);
+    if (!playerId) return;
+    this.connToPlayer.delete(sender.id);
+    this.removePlayer(playerId);
+  }
+
   onClose(connection: Party.Connection) {
-    const wasHost = this.hostId === connection.id;
-    const left = this.players.get(connection.id);
-    this.players.delete(connection.id);
-    if (!left) return;
+    const playerId = this.connToPlayer.get(connection.id);
+    this.connToPlayer.delete(connection.id);
+    if (!playerId) return; // already handled via an explicit "leave", or never fully joined
 
-    this.broadcast({ t: "playerLeft", id: connection.id });
+    const player = this.players.get(playerId);
+    if (!player) return;
 
-    if (wasHost) {
+    // Unintentional drop (network blip, backgrounded tab, reload): hold their
+    // seat for a grace window instead of announcing them gone right away —
+    // an explicit Leave (handleLeave, above) is the only path that removes a
+    // player immediately.
+    player.connected = false;
+    this.players.set(playerId, player);
+    this.broadcast({ t: "playerUpdated", player });
+
+    const existingTimer = this.disconnectTimers.get(playerId);
+    if (existingTimer) clearTimeout(existingTimer);
+    this.disconnectTimers.set(
+      playerId,
+      setTimeout(() => {
+        this.disconnectTimers.delete(playerId);
+        // Only actually remove them if they never reconnected in time.
+        if (this.players.get(playerId)?.connected === false) {
+          this.removePlayer(playerId);
+        }
+      }, DISCONNECT_GRACE_MS),
+    );
+  }
+
+  /** Fully removes a player's seat: roster, host handoff, and race/battle bookkeeping. */
+  private removePlayer(playerId: string) {
+    const existing = this.players.get(playerId);
+    if (!existing) return;
+
+    const timer = this.disconnectTimers.get(playerId);
+    if (timer) {
+      clearTimeout(timer);
+      this.disconnectTimers.delete(playerId);
+    }
+    for (const [sessionId, pid] of this.sessionIndex) {
+      if (pid === playerId) this.sessionIndex.delete(sessionId);
+    }
+
+    this.players.delete(playerId);
+    this.broadcast({ t: "playerLeft", id: playerId });
+
+    if (this.hostId === playerId) {
       const next = this.players.keys().next();
       if (!next.done) {
         this.hostId = next.value;
@@ -166,8 +228,46 @@ export default class RoomServer implements Party.Server {
     requestedMax?: number,
     requestedTrackId?: string,
     requestedMode?: RoomMode,
+    sessionId?: string,
   ) {
-    if (this.players.has(sender.id)) return; // already joined (dup message)
+    if (this.connToPlayer.has(sender.id)) return; // already joined on this connection (dup message)
+
+    // Reattachment: same browser session reconnecting after a network blip,
+    // tab reload, or backgrounded phone — resume their existing seat rather
+    // than treating them as a brand-new player (which would also get
+    // rejected outright once the race has started).
+    if (sessionId) {
+      const existingPlayerId = this.sessionIndex.get(sessionId);
+      const existing = existingPlayerId ? this.players.get(existingPlayerId) : undefined;
+      if (existingPlayerId && existing) {
+        this.connToPlayer.set(sender.id, existingPlayerId);
+        existing.connected = true;
+        existing.name = sanitizeName(name);
+        this.players.set(existingPlayerId, existing);
+
+        const timer = this.disconnectTimers.get(existingPlayerId);
+        if (timer) {
+          clearTimeout(timer);
+          this.disconnectTimers.delete(existingPlayerId);
+        }
+
+        sender.setState({ joined: true });
+        this.send(sender, {
+          t: "welcome",
+          selfId: existingPlayerId,
+          roomId: this.room.id,
+          players: Array.from(this.players.values()),
+          phase: this.phase,
+          hostId: this.hostId ?? existingPlayerId,
+          maxPlayers: this.maxPlayers,
+          trackId: this.trackId,
+          mode: this.mode,
+          rejoined: true,
+        });
+        this.broadcast({ t: "playerUpdated", player: existing }, [sender.id]);
+        return;
+      }
+    }
 
     if (this.players.size === 0) {
       this.hostId = sender.id;
@@ -196,37 +296,41 @@ export default class RoomServer implements Party.Server {
 
     const takenCharacters = Array.from(this.players.values()).map((p) => p.characterId);
     const character = unclaimedCharacter(takenCharacters);
+    const playerId = sender.id;
 
     const info: PlayerInfo = {
-      id: sender.id,
+      id: playerId,
       name: sanitizeName(name),
       color: character.color,
       characterId: character.id,
       ready: false,
       connected: true,
-      isHost: sender.id === this.hostId,
+      isHost: playerId === this.hostId,
       joinedAt: Date.now(),
     };
-    this.players.set(sender.id, info);
+    this.players.set(playerId, info);
+    this.connToPlayer.set(sender.id, playerId);
+    if (sessionId) this.sessionIndex.set(sessionId, playerId);
     sender.setState({ joined: true });
 
     this.send(sender, {
       t: "welcome",
-      selfId: sender.id,
+      selfId: playerId,
       roomId: this.room.id,
       players: Array.from(this.players.values()),
       phase: this.phase,
-      hostId: this.hostId ?? sender.id,
+      hostId: this.hostId ?? playerId,
       maxPlayers: this.maxPlayers,
       trackId: this.trackId,
       mode: this.mode,
+      rejoined: false,
     });
 
     this.broadcast({ t: "playerJoined", player: info }, [sender.id]);
   }
 
   private handleReady(sender: Party.Connection, ready: boolean) {
-    const p = this.players.get(sender.id);
+    const p = this.playerFor(sender);
     if (!p || this.phase !== "lobby") return;
     p.ready = ready;
     this.players.set(p.id, p);
@@ -234,12 +338,12 @@ export default class RoomServer implements Party.Server {
   }
 
   private handleSelectCharacter(sender: Party.Connection, characterId: string) {
-    const p = this.players.get(sender.id);
+    const p = this.playerFor(sender);
     if (!p || this.phase !== "lobby") return;
     const character = getCharacter(characterId);
     if (!character) return;
     const takenByOther = Array.from(this.players.values()).some(
-      (other) => other.id !== sender.id && other.characterId === characterId,
+      (other) => other.id !== p.id && other.characterId === characterId,
     );
     if (takenByOther) {
       this.send(sender, { t: "error", message: "That driver is already taken." });
@@ -252,7 +356,8 @@ export default class RoomServer implements Party.Server {
   }
 
   private handleSelectTrack(sender: Party.Connection, trackId: string) {
-    if (sender.id !== this.hostId || this.phase !== "lobby") return;
+    const p = this.playerFor(sender);
+    if (!p || p.id !== this.hostId || this.phase !== "lobby") return;
     if (this.mode === "battle") return; // arena is fixed for battle mode
     if (!trackId) return;
     this.trackId = trackId;
@@ -260,7 +365,8 @@ export default class RoomServer implements Party.Server {
   }
 
   private handleStart(sender: Party.Connection) {
-    if (sender.id !== this.hostId || this.phase !== "lobby") return;
+    const starter = this.playerFor(sender);
+    if (!starter || starter.id !== this.hostId || this.phase !== "lobby") return;
     if (this.players.size < MIN_PLAYERS) {
       this.send(sender, {
         t: "error",
@@ -301,7 +407,8 @@ export default class RoomServer implements Party.Server {
   }
 
   private handleRematch(sender: Party.Connection) {
-    if (sender.id !== this.hostId || this.phase !== "finished") return;
+    const p = this.playerFor(sender);
+    if (!p || p.id !== this.hostId || this.phase !== "finished") return;
     this.phase = "lobby";
     this.finishedIds.clear();
     this.finishOrder = [];
@@ -323,6 +430,8 @@ export default class RoomServer implements Party.Server {
 
   private handlePickup(sender: Party.Connection, boxId: string) {
     if (this.phase !== "racing") return;
+    const p = this.playerFor(sender);
+    if (!p) return;
     const now = Date.now();
     const existing = this.itemBoxes.get(boxId);
     if (existing && existing.consumedUntil > now) return;
@@ -331,7 +440,7 @@ export default class RoomServer implements Party.Server {
     const respawnAt = now + ITEM_BOX_RESPAWN_MS;
     this.itemBoxes.set(boxId, { consumedUntil: respawnAt });
 
-    this.send(sender, { t: "itemGranted", id: sender.id, item, boxId });
+    this.send(sender, { t: "itemGranted", id: p.id, item, boxId });
     this.broadcast({ t: "boxConsumed", boxId, respawnAt });
   }
 
@@ -340,14 +449,14 @@ export default class RoomServer implements Party.Server {
     msg: Extract<ClientMessage, { t: "weapon" }>,
   ) {
     if (this.phase !== "racing") return;
-    const player = this.players.get(sender.id);
+    const player = this.playerFor(sender);
     if (!player) return;
 
     this.broadcast({
       t: "weaponFired",
       id: msg.id,
       kind: msg.kind,
-      from: sender.id,
+      from: player.id,
       fromName: player.name,
       p: msg.p,
       yaw: msg.yaw,
@@ -358,7 +467,7 @@ export default class RoomServer implements Party.Server {
     if ((msg.kind === "ball" || msg.kind === "blueprint") && msg.targetId) {
       const targetId = msg.targetId;
       const delay = WEAPON_DURATION[msg.kind];
-      const attackerId = sender.id;
+      const attackerId = player.id;
       setTimeout(() => {
         if (!this.players.has(targetId)) return;
         this.broadcast({
@@ -375,14 +484,14 @@ export default class RoomServer implements Party.Server {
   }
 
   private handleFinish(sender: Party.Connection, timeMs: number) {
-    if (this.phase !== "racing" || this.finishedIds.has(sender.id)) return;
-    const player = this.players.get(sender.id);
-    if (!player) return;
+    if (this.phase !== "racing") return;
+    const player = this.playerFor(sender);
+    if (!player || this.finishedIds.has(player.id)) return;
 
-    this.finishedIds.add(sender.id);
+    this.finishedIds.add(player.id);
     const place = this.finishedIds.size;
-    this.finishOrder.push({ id: sender.id, name: player.name, place, timeMs, dnf: false });
-    this.broadcast({ t: "playerFinished", id: sender.id, timeMs, place });
+    this.finishOrder.push({ id: player.id, name: player.name, place, timeMs, dnf: false });
+    this.broadcast({ t: "playerFinished", id: player.id, timeMs, place });
 
     if (this.finishedIds.size === 1 && !this.wrapUpTimer) {
       this.wrapUpTimer = setTimeout(() => this.maybeConcludeRace(true), WRAP_UP_MS);

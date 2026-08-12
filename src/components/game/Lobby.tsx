@@ -211,7 +211,9 @@ export default function Lobby() {
             return (
               <li
                 key={p.id}
-                className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2"
+                className={`flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 ${
+                  !p.connected ? "opacity-50" : ""
+                }`}
               >
                 <span className="flex items-center gap-2 text-white">
                   <span
@@ -229,10 +231,14 @@ export default function Lobby() {
                 </span>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-bold uppercase ${
-                    p.ready ? "bg-emerald-500/20 text-emerald-300" : "bg-white/10 text-white/40"
+                    !p.connected
+                      ? "bg-amber-500/20 text-amber-300"
+                      : p.ready
+                        ? "bg-emerald-500/20 text-emerald-300"
+                        : "bg-white/10 text-white/40"
                   }`}
                 >
-                  {p.ready ? "Ready" : "Not ready"}
+                  {!p.connected ? "Reconnecting…" : p.ready ? "Ready" : "Not ready"}
                 </span>
               </li>
             );

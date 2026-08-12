@@ -54,7 +54,15 @@ export interface BattleResultEntry {
 // ---------- Client -> Server ----------
 
 export type ClientMessage =
-  | { t: "join"; name: string; maxPlayers?: number; trackId?: string; mode?: RoomMode }
+  | {
+      t: "join";
+      name: string;
+      maxPlayers?: number;
+      trackId?: string;
+      mode?: RoomMode;
+      sessionId: string;
+    }
+  | { t: "leave" }
   | { t: "ready"; ready: boolean }
   | { t: "selectCharacter"; characterId: string }
   | { t: "selectTrack"; trackId: string }
@@ -100,6 +108,7 @@ export type ServerMessage =
       maxPlayers: number;
       trackId: string;
       mode: RoomMode;
+      rejoined: boolean;
     }
   | { t: "playerJoined"; player: PlayerInfo }
   | { t: "playerLeft"; id: string }
