@@ -42,6 +42,19 @@ export const WEAPON_COOLDOWN_MS = 850;
 export const ITEM_BOX_RESPAWN_MS = 5000;
 export const ITEM_BOX_PICKUP_RADIUS = 2.3;
 
+// Manual-aim targeting for the wrecking ball and blueprint blindness: you
+// only hit whoever is actually in front of you within this cone and range —
+// no auto-lock onto the leader or nearest rival regardless of where you're
+// pointed. Missing (nobody in the cone) still fires and still consumes the
+// item, same as landing a hit.
+export const WEAPON_AIM_HALF_ANGLE_RAD = (28 * Math.PI) / 180;
+export const WEAPON_AIM_RANGE = 50;
+
+// How long the item-box reveal spins through weapon icons before landing on
+// the granted item — the classic kart-racer "roulette" beat.
+export const ITEM_REVEAL_MS = 900;
+export const ITEM_REVEAL_TICK_MS = 90;
+
 export const STUN_DURATION_MS = 1150;
 export const WALL_HIT_RADIUS = 1.9;
 export const BALL_HIT_RADIUS = 2.4;

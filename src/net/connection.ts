@@ -185,7 +185,7 @@ export class GameConnection {
         break;
       }
       case "itemGranted": {
-        store.setHeldItem(msg.item as never);
+        store.grantItemWithReveal(msg.item as never);
         this.itemGrantListeners.forEach((fn) => fn(msg.item, msg.boxId));
         break;
       }

@@ -8,6 +8,7 @@ import type {
   WeaponKind,
 } from "@/shared/types";
 import { DEFAULT_TRACK_ID } from "@/shared/types";
+import { ITEM_REVEAL_MS } from "@/lib/constants";
 
 export type ConnStatus = "connecting" | "open" | "reconnecting" | "closed";
 
@@ -52,6 +53,11 @@ interface GameState {
   battleResults: BattleResultEntry[] | null;
   battleHits: Record<string, number>;
   heldItem: WeaponKind | null;
+  // Set the instant a box grant arrives; cleared once the roulette spin
+  // lands and heldItem becomes usable. `token` disambiguates overlapping
+  // reveals (e.g. a fresh pickup racing an in-flight timer) so a stale
+  // timeout can never clobber a newer grant.
+  pendingReveal: { item: WeaponKind; token: number } | null;
   selfRace: SelfRaceState;
   effects: ActiveEffects;
   toasts: Toast[];
@@ -78,6 +84,8 @@ interface GameState {
   startRace: (startAt: number, order: string[], trackId: string, mode: RoomMode) => void;
   resetRace: () => void;
   setHeldItem: (item: WeaponKind | null) => void;
+  /** Starts the CTR-style spin reveal; heldItem stays null/unusable until it lands. */
+  grantItemWithReveal: (item: WeaponKind) => void;
   updateSelfRace: (partial: Partial<SelfRaceState>) => void;
   setResults: (r: RaceResultEntry[]) => void;
   setBattleResults: (r: BattleResultEntry[]) => void;
@@ -90,6 +98,7 @@ interface GameState {
 }
 
 let toastSeq = 0;
+let revealTokenSeq = 0;
 
 export const useGameStore = create<GameState>((set, get) => ({
   roomId: null,
@@ -109,6 +118,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   battleResults: null,
   battleHits: {},
   heldItem: null,
+  pendingReveal: null,
   selfRace: {
     lap: 1,
     checkpoint: 0,
@@ -181,6 +191,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       battleHits: {},
       raceStartAt: null,
       heldItem: null,
+      pendingReveal: null,
       effects: { stunnedUntil: 0, blindedUntil: 0, boostUntil: 0, boostPower: 0 },
       selfRace: {
         lap: 1,
@@ -197,6 +208,17 @@ export const useGameStore = create<GameState>((set, get) => ({
     }),
 
   setHeldItem: (item) => set({ heldItem: item }),
+
+  grantItemWithReveal: (item) => {
+    const token = ++revealTokenSeq;
+    set({ heldItem: null, pendingReveal: { item, token } });
+    setTimeout(() => {
+      set((s) => {
+        if (s.pendingReveal?.token !== token) return {};
+        return { heldItem: item, pendingReveal: null };
+      });
+    }, ITEM_REVEAL_MS);
+  },
 
   updateSelfRace: (partial) =>
     set((s) => ({ selfRace: { ...s.selfRace, ...partial } })),

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useGameStore } from "@/state/gameStore";
 import { useTrack } from "@/hooks/useTrack";
+import { useItemReveal } from "@/hooks/useItemReveal";
 import { WEAPON_ICON, WEAPON_LABEL } from "@/components/game/weaponMeta";
 import { BATTLE_DURATION_MS } from "@/lib/constants";
 import Standings from "@/components/game/Standings";
@@ -34,7 +35,7 @@ export default function HUD() {
   const selfId = useGameStore((s) => s.selfId);
   const battleHits = useGameStore((s) => s.battleHits);
   const raceStartAt = useGameStore((s) => s.raceStartAt);
-  const heldItem = useGameStore((s) => s.heldItem);
+  const { icon: itemIcon, revealing } = useItemReveal();
   const playerCount = useGameStore((s) => Object.keys(s.players).length);
   const connStatus = useGameStore((s) => s.connStatus);
   const [now, setNow] = useState(0);
@@ -99,14 +100,18 @@ export default function HUD() {
       {/* Desktop item indicator (mirrors the mobile item button) */}
       <div
         className={`absolute right-6 top-[max(1rem,env(safe-area-inset-top))] hidden h-16 w-16 flex-col items-center justify-center rounded-2xl border-2 text-2xl text-white backdrop-blur-sm transition md:flex ${
-          heldItem
-            ? "animate-pulse border-amber-400/70 bg-amber-500/20 shadow-[0_0_18px_rgba(255,178,32,0.4)]"
-            : "border-white/20 bg-black/35"
+          revealing
+            ? "border-sky-300/80 bg-sky-500/20 shadow-[0_0_18px_rgba(56,189,248,0.5)]"
+            : itemIcon
+              ? "animate-pulse border-amber-400/70 bg-amber-500/20 shadow-[0_0_18px_rgba(255,178,32,0.4)]"
+              : "border-white/20 bg-black/35"
         }`}
       >
-        <span>{heldItem ? WEAPON_ICON[heldItem] : "▢"}</span>
+        <span className={revealing ? "animate-spin" : undefined}>
+          {itemIcon ? WEAPON_ICON[itemIcon] : "▢"}
+        </span>
         <span className="text-[9px] font-bold uppercase tracking-wide text-white/60">
-          {heldItem ? WEAPON_LABEL[heldItem] : "empty"}
+          {revealing ? "..." : itemIcon ? WEAPON_LABEL[itemIcon] : "empty"}
         </span>
       </div>
     </div>

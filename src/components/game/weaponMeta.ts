@@ -1,5 +1,7 @@
 import type { WeaponKind } from "@/shared/types";
 
+export const WEAPON_KINDS: WeaponKind[] = ["wall", "ball", "blueprint", "scaffold"];
+
 export const WEAPON_LABEL: Record<WeaponKind, string> = {
   wall: "Concrete Wall",
   ball: "Wrecking Ball",

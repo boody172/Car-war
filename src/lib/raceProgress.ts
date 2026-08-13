@@ -66,38 +66,36 @@ export function computePlace(selfId: string, self: Omit<Progress, "id">): number
   return all.findIndex((p) => p.id === selfId) + 1;
 }
 
-/** Finds the current race leader among opponents (highest lap/checkpoint/dist). */
-export function findLeader(excludeId?: string): string | null {
-  const candidates: Progress[] = [];
-  for (const id of getAllIds()) {
-    if (id === excludeId) continue;
-    const snap = getLatest(id);
-    if (snap) candidates.push({ id, lap: snap.lap, cp: snap.cp, dist: snap.dist });
-  }
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => {
-    if (a.lap !== b.lap) return b.lap - a.lap;
-    if (a.cp !== b.cp) return b.cp - a.cp;
-    return b.dist - a.dist;
-  });
-  return candidates[0].id;
-}
-
-/** Nearest other racer to a world position — used for Blueprint Blindness targeting. */
-export function findNearest(
+/**
+ * Closest opponent actually in front of the shooter — within a forward
+ * cone and range — rather than a blind auto-lock onto the leader or nearest
+ * rival. Used to fire the wrecking ball and blueprint blindness: you have to
+ * actually point your kart at someone to hit them. Returns null on a miss
+ * (nobody in the cone), which the caller still fires as a clean whiff rather
+ * than silently cancelling the shot.
+ */
+export function findInAimCone(
   fromPos: THREE.Vector3,
-  excludeId?: string,
+  forward: THREE.Vector3,
+  excludeId: string | undefined,
+  maxAngleRad: number,
+  maxRange: number,
 ): { id: string; position: THREE.Vector3 } | null {
+  const fwd = forward.clone().normalize();
   let best: { id: string; position: THREE.Vector3 } | null = null;
-  let bestD = Infinity;
+  let bestDist = Infinity;
   for (const id of getAllIds()) {
     if (id === excludeId) continue;
     const snap = getLatest(id);
     if (!snap) continue;
     const p = new THREE.Vector3(snap.p[0], snap.p[1], snap.p[2]);
-    const d = p.distanceToSquared(fromPos);
-    if (d < bestD) {
-      bestD = d;
+    const toTarget = p.clone().sub(fromPos);
+    const dist = toTarget.length();
+    if (dist < 0.05 || dist > maxRange) continue;
+    const angle = fwd.angleTo(toTarget.multiplyScalar(1 / dist));
+    if (angle > maxAngleRad) continue;
+    if (dist < bestDist) {
+      bestDist = dist;
       best = { id, position: p };
     }
   }

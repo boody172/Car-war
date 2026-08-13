@@ -2,13 +2,13 @@
 
 import { useCallback, useRef, useState } from "react";
 import { inputState } from "@/lib/input";
-import { useGameStore } from "@/state/gameStore";
+import { useItemReveal } from "@/hooks/useItemReveal";
 import { WEAPON_ICON, WEAPON_LABEL } from "@/components/game/weaponMeta";
 
 const STICK_RADIUS = 52;
 
 export default function TouchControls() {
-  const heldItem = useGameStore((s) => s.heldItem);
+  const { icon: itemIcon, revealing } = useItemReveal();
   const [stickPos, setStickPos] = useState({ x: 0, y: 0 });
   const [gasActive, setGasActive] = useState(false);
   const [brakeActive, setBrakeActive] = useState(false);
@@ -72,17 +72,21 @@ export default function TouchControls() {
 
       {/* Item button */}
       <button
-        className="pointer-events-auto absolute right-6 top-[max(1.25rem,env(safe-area-inset-top))] flex h-16 w-16 flex-col items-center justify-center rounded-2xl border-2 border-white/25 bg-black/35 text-2xl backdrop-blur-sm active:scale-95 disabled:opacity-30"
+        className={`pointer-events-auto absolute right-6 top-[max(1.25rem,env(safe-area-inset-top))] flex h-16 w-16 flex-col items-center justify-center rounded-2xl border-2 text-2xl backdrop-blur-sm active:scale-95 disabled:opacity-30 ${
+          revealing ? "border-sky-300/80 bg-sky-500/20" : "border-white/25 bg-black/35"
+        }`}
         style={{ touchAction: "none" }}
-        disabled={!heldItem}
+        disabled={revealing || !itemIcon}
         onPointerDown={(e) => {
           e.preventDefault();
           inputState.itemRequested = true;
         }}
       >
-        <span>{heldItem ? WEAPON_ICON[heldItem] : "▢"}</span>
+        <span className={revealing ? "animate-spin" : undefined}>
+          {itemIcon ? WEAPON_ICON[itemIcon] : "▢"}
+        </span>
         <span className="text-[9px] font-bold uppercase tracking-wide text-white/70">
-          {heldItem ? WEAPON_LABEL[heldItem] : "empty"}
+          {revealing ? "..." : itemIcon ? WEAPON_LABEL[itemIcon] : "empty"}
         </span>
       </button>
 

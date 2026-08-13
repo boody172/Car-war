@@ -49,6 +49,10 @@ export interface WallSegment {
 export interface ItemBoxDef {
   id: string;
   position: [number, number, number];
+  // Orientation of the track at this point, so the client can render the
+  // classic kart-racer cluster of 3 boxes laid out across the track rather
+  // than a single box, without needing to re-derive the tangent itself.
+  rotationY: number;
 }
 
 export type ObstacleKind = "crateStack" | "pipe" | "barrier" | "cone";
@@ -228,7 +232,8 @@ export function buildTrackData(config: TrackConfig): TrackData {
     const n = new THREE.Vector3(t.z, 0, -t.x).normalize();
     const offset = i % 2 === 0 ? 2.6 : -2.6;
     const pos = p.clone().addScaledVector(n, offset);
-    return { id: `box-${i}`, position: [pos.x, 1, pos.z] };
+    const rotationY = Math.atan2(t.x, t.z);
+    return { id: `box-${i}`, position: [pos.x, 1, pos.z], rotationY };
   });
 
   const ramp: RampDef = (() => {

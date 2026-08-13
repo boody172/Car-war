@@ -13,15 +13,16 @@ import {
   WALL_HIT_RADIUS,
   STUN_DURATION_MS,
   ITEM_BOX_PICKUP_RADIUS,
+  WEAPON_AIM_HALF_ANGLE_RAD,
+  WEAPON_AIM_RANGE,
 } from "@/lib/constants";
 import { inputState, consumeItemRequest } from "@/lib/input";
 import { useGameStore } from "@/state/gameStore";
 import { useHazardStore } from "@/state/hazardStore";
-import { RaceProgressTracker, computePlace, findLeader, findNearest } from "@/lib/raceProgress";
+import { RaceProgressTracker, computePlace, findInAimCone } from "@/lib/raceProgress";
 import { getConnection } from "@/net/connection";
-import { getLatest } from "@/net/snapshotBuffer";
 import { useTrack } from "@/hooks/useTrack";
-import type { Vec3, WeaponKind } from "@/shared/types";
+import type { WeaponKind } from "@/shared/types";
 
 interface KartProps {
   startPosition: [number, number, number];
@@ -110,28 +111,26 @@ export default function Kart({ startPosition, startRotationY, color, cameraEnabl
       } else if (kind === "scaffold") {
         const front = pos.clone().addScaledVector(forward, 4.5);
         conn.send({ t: "weapon", id, kind, p: [front.x, 0, front.z], yaw });
-      } else if (kind === "ball") {
-        const battleMode = useGameStore.getState().mode === "battle";
-        const targetId = battleMode ? findNearest(pos, selfId)?.id ?? null : findLeader(selfId);
-        if (!targetId) return;
-        const snap = getLatest(targetId);
-        const targetP: Vec3 = snap ? snap.p : [pos.x, pos.y, pos.z];
-        conn.send({ t: "weapon", id, kind, p: [pos.x, pos.y, pos.z], yaw, targetId, targetP });
-      } else if (kind === "blueprint") {
-        const nearest = findNearest(pos, selfId);
-        if (!nearest) return;
-        const targetP: [number, number, number] = [
-          nearest.position.x,
-          nearest.position.y,
-          nearest.position.z,
-        ];
+      } else if (kind === "ball" || kind === "blueprint") {
+        // Manually aimed, not an auto-lock: only hits whoever is actually in
+        // front of you within range. Nobody there is a clean miss — the shot
+        // still fires (and the item is still spent) rather than the button
+        // silently doing nothing, so aiming carries real risk.
+        const hit = findInAimCone(pos, forward, selfId, WEAPON_AIM_HALF_ANGLE_RAD, WEAPON_AIM_RANGE);
+        const targetP: [number, number, number] = hit
+          ? [hit.position.x, hit.position.y, hit.position.z]
+          : [
+              pos.x + forward.x * WEAPON_AIM_RANGE,
+              pos.y,
+              pos.z + forward.z * WEAPON_AIM_RANGE,
+            ];
         conn.send({
           t: "weapon",
           id,
           kind,
           p: [pos.x, pos.y, pos.z],
           yaw,
-          targetId: nearest.id,
+          targetId: hit?.id,
           targetP,
         });
       }
@@ -277,7 +276,7 @@ export default function Kart({ startPosition, startRotationY, color, cameraEnabl
     }
 
     // --- Item box pickups ---
-    if (gameState.phase === "racing" && !gameState.heldItem) {
+    if (gameState.phase === "racing" && !gameState.heldItem && !gameState.pendingReveal) {
       for (const box of track.itemBoxes) {
         const cd = boxCooldowns.current.get(box.id) ?? 0;
         if (cd > now) continue;
