@@ -351,7 +351,7 @@ export default function Kart({ startPosition, startRotationY, color, cameraEnabl
   return (
     <group ref={chassisRef}>
       <KartModel ref={modelRef} color={color} />
-      {cameraEnabled && <CameraRig targetRef={chassisRef} />}
+      {cameraEnabled && <CameraRig posRef={posRef} quatRef={quatRef} />}
     </group>
   );
 }

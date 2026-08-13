@@ -6,31 +6,44 @@ import * as THREE from "three";
 import { CAMERA } from "@/lib/constants";
 
 interface CameraRigProps {
-  targetRef: RefObject<THREE.Object3D | null>;
+  // @react-three/cannon drives the physics body's Object3D by setting
+  // matrixAutoUpdate = false and writing straight into object.matrix each
+  // step — it never touches object.position/quaternion, so reading those
+  // off the ref (as this used to do) just returns the kart's spawn
+  // transform forever. posRef/quatRef are the same live values Kart.tsx
+  // already keeps in sync via api.position.subscribe/api.quaternion.subscribe,
+  // so the camera tracks what the kart is actually doing.
+  posRef: RefObject<THREE.Vector3>;
+  quatRef: RefObject<THREE.Quaternion>;
 }
 
-export default function CameraRig({ targetRef }: CameraRigProps) {
+export default function CameraRig({ posRef, quatRef }: CameraRigProps) {
   const desiredPos = useRef(new THREE.Vector3());
   const lookAt = useRef(new THREE.Vector3());
   const initialized = useRef(false);
 
   useFrame(({ camera }, rawDelta) => {
-    const target = targetRef.current;
-    if (!target) return;
-    const dt = Math.min(rawDelta, 1 / 30);
+    const pos = posRef.current;
+    const quat = quatRef.current;
+    if (!pos || !quat) return;
+    // This is a closed-loop exponential damp toward the target, stable for
+    // any dt — unlike Kart.tsx's own physics integration, it doesn't need a
+    // tight clamp to stay numerically sound. A large ceiling here only
+    // guards against a single absurd frame (e.g. a backgrounded tab).
+    const dt = Math.min(rawDelta, 0.5);
 
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(target.quaternion);
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
     const behind = forward.clone().multiplyScalar(-CAMERA.followDistance);
 
     desiredPos.current.set(
-      target.position.x + behind.x,
-      target.position.y + CAMERA.followHeight,
-      target.position.z + behind.z,
+      pos.x + behind.x,
+      pos.y + CAMERA.followHeight,
+      pos.z + behind.z,
     );
     lookAt.current.set(
-      target.position.x + forward.x * 2,
-      target.position.y + CAMERA.lookHeight,
-      target.position.z + forward.z * 2,
+      pos.x + forward.x * 2,
+      pos.y + CAMERA.lookHeight,
+      pos.z + forward.z * 2,
     );
 
     if (!initialized.current) {
