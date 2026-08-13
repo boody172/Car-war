@@ -36,6 +36,7 @@ export default function HUD() {
   const battleHits = useGameStore((s) => s.battleHits);
   const raceStartAt = useGameStore((s) => s.raceStartAt);
   const { icon: itemIcon, revealing } = useItemReveal();
+  const aimLockedId = useGameStore((s) => s.aimLockedId);
   const playerCount = useGameStore((s) => Object.keys(s.players).length);
   const connStatus = useGameStore((s) => s.connStatus);
   const [now, setNow] = useState(0);
@@ -48,6 +49,8 @@ export default function HUD() {
   const elapsed = selfRace.raceStartedAt ? now - selfRace.raceStartedAt : 0;
   const battleRemaining = raceStartAt ? raceStartAt + BATTLE_DURATION_MS - now : BATTLE_DURATION_MS;
   const myScore = selfId ? (battleHits[selfId] ?? 0) : 0;
+  const aimable = !revealing && (itemIcon === "ball" || itemIcon === "blueprint");
+  const locked = aimable && aimLockedId !== null;
 
   return (
     <div className="pointer-events-none fixed inset-0 z-20 select-none">
@@ -85,6 +88,32 @@ export default function HUD() {
       </div>
 
       <Standings />
+
+      {/* Aim reticle: shown whenever a ball/blueprint is held, so the player
+          can see — before firing — whether they're actually pointed at an
+          opponent. Turns green and reports "TARGET LOCKED" the instant the
+          forward cone finds someone; still requires the explicit fire button,
+          it never fires or steers on its own. */}
+      {aimable && (
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+          <div
+            className={`h-14 w-14 rounded-full border-2 transition-colors ${
+              locked ? "border-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.7)]" : "border-white/50"
+            }`}
+          >
+            <div
+              className={`absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full ${
+                locked ? "bg-emerald-400" : "bg-white/70"
+              }`}
+            />
+          </div>
+          {locked && (
+            <div className="absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap rounded-full bg-emerald-500/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black">
+              Target Locked
+            </div>
+          )}
+        </div>
+      )}
 
       {connStatus !== "open" && (
         <div className="absolute left-1/2 top-16 -translate-x-1/2 rounded-full bg-amber-500/90 px-3 py-1 text-xs font-bold text-black">

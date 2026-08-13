@@ -58,6 +58,11 @@ interface GameState {
   // reveals (e.g. a fresh pickup racing an in-flight timer) so a stale
   // timeout can never clobber a newer grant.
   pendingReveal: { item: WeaponKind; token: number } | null;
+  // Which opponent (if any) the ball/blueprint aim cone is currently over —
+  // purely informational for the on-screen reticle, recomputed every physics
+  // tick in Kart.tsx. Firing still requires an explicit button press; this
+  // never auto-fires or auto-follows on its own.
+  aimLockedId: string | null;
   selfRace: SelfRaceState;
   effects: ActiveEffects;
   toasts: Toast[];
@@ -86,6 +91,7 @@ interface GameState {
   setHeldItem: (item: WeaponKind | null) => void;
   /** Starts the CTR-style spin reveal; heldItem stays null/unusable until it lands. */
   grantItemWithReveal: (item: WeaponKind) => void;
+  setAimLocked: (id: string | null) => void;
   updateSelfRace: (partial: Partial<SelfRaceState>) => void;
   setResults: (r: RaceResultEntry[]) => void;
   setBattleResults: (r: BattleResultEntry[]) => void;
@@ -119,6 +125,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   battleHits: {},
   heldItem: null,
   pendingReveal: null,
+  aimLockedId: null,
   selfRace: {
     lap: 1,
     checkpoint: 0,
@@ -192,6 +199,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       raceStartAt: null,
       heldItem: null,
       pendingReveal: null,
+      aimLockedId: null,
       effects: { stunnedUntil: 0, blindedUntil: 0, boostUntil: 0, boostPower: 0 },
       selfRace: {
         lap: 1,
@@ -219,6 +227,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       });
     }, ITEM_REVEAL_MS);
   },
+
+  setAimLocked: (id) => set({ aimLockedId: id }),
 
   updateSelfRace: (partial) =>
     set((s) => ({ selfRace: { ...s.selfRace, ...partial } })),

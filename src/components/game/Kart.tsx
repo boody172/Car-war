@@ -42,6 +42,7 @@ export default function Kart({ startPosition, startRotationY, color, cameraEnabl
   const lastSendRef = useRef(0);
   const boxCooldowns = useRef(new Map<string, number>());
   const weaponCooldownUntil = useRef(0);
+  const lastAimLockRef = useRef<string | null>(null);
 
   const posRef = useRef(new THREE.Vector3(...startPosition));
   const quatRef = useRef(new THREE.Quaternion());
@@ -313,6 +314,20 @@ export default function Kart({ startPosition, startRotationY, color, cameraEnabl
           api.velocity.set(localVel.current.x, vel.y + 3.2, localVel.current.y);
         }
       }
+    }
+
+    // --- Aim reticle (purely informational — never fires or auto-follows) ---
+    // Recomputed every tick so the HUD reticle can tell the player, in real
+    // time, whether they're actually pointed at someone before they commit
+    // to pulling the trigger.
+    const aimable = gameState.heldItem === "ball" || gameState.heldItem === "blueprint";
+    const aimHit = aimable
+      ? findInAimCone(pos, forward, selfId ?? undefined, WEAPON_AIM_HALF_ANGLE_RAD, WEAPON_AIM_RANGE)
+      : null;
+    const aimId = aimHit?.id ?? null;
+    if (aimId !== lastAimLockRef.current) {
+      lastAimLockRef.current = aimId;
+      gameState.setAimLocked(aimId);
     }
 
     // --- Item use ---

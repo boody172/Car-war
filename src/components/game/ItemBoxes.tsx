@@ -59,6 +59,10 @@ function ItemBoxCluster({
       {CLUSTER_OFFSETS.map((offset, i) => (
         <ItemBoxCrate key={i} localX={offset} phase={i * 0.6} />
       ))}
+      {/* One shared light for the whole cluster rather than one per crate —
+          real-time point lights are expensive per-scene, and three sitting
+          ~1.3m apart don't need independent illumination. */}
+      <pointLight color="#ffd23c" intensity={3.2} distance={5} position={[0, 0.6, 0]} />
     </group>
   );
 }
@@ -91,7 +95,6 @@ function ItemBoxCrate({ localX, phase }: { localX: number; phase: number }) {
         <boxGeometry args={[1, 0.12, 1]} />
         <meshStandardMaterial color="#2b2f36" />
       </mesh>
-      <pointLight color="#ffd23c" intensity={2.4} distance={3.2} />
     </group>
   );
 }
