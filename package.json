@@ -9,6 +9,7 @@
     "lint": "eslint",
     "party:dev": "partykit dev --port 1999",
     "party:deploy": "partykit deploy",
+    "worker:deploy": "wrangler deploy",
     "dev:all": "concurrently -n web,party -c blue,magenta \"npm:dev\" \"npm:party:dev\""
   },
   "dependencies": {
@@ -25,6 +26,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260813.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -34,6 +36,7 @@
     "eslint-config-next": "16.3.0",
     "partykit": "^0.0.115",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.122.0"
   }
 }
