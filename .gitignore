@@ -40,6 +40,9 @@ yarn-error.log*
 # partykit
 .partykit
 
+# wrangler / cloudflare workers
+.wrangler
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
